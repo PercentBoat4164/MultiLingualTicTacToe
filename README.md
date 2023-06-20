@@ -1,1 +1,1 @@
-# MultiLinugalTicTacToe
+# MultiLingualTicTacToe
