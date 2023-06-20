@@ -1,0 +1,10 @@
+#   When you add a programming language add any files
+# and any directories not required to build the
+# implementation here.
+
+# JetBrains project files
+/.idea/
+# CMake build files
+/*/*-build-*/
+# Python virtual environment
+/venv/
