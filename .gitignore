@@ -7,4 +7,6 @@
 # CMake build files
 /*/*-build-*/
 # Python virtual environment
-/venv/
+/*/venv/
+# Cargo build files
+/*/target
