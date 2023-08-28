@@ -1,5 +1,5 @@
 [package]
-name = "multi_lingual_tic_tac_toe"
+name = "rust"
 version = "0.1.0"
 edition = "2021"
 
