@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 pub struct Board {
     pub(crate) player: char,
     player_index: u8,
@@ -8,7 +6,7 @@ pub struct Board {
     win_states: [[u8; 3]; 8],
 }
 
-impl Display for Board {
+impl std::fmt::Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = format!("\nTic-Tac-Toe\n {} │ {} │ {} \n───┼───┼───\n {} │ {} │ {} \n───┼───┼───\n {} │ {} │ {} \n", self.contents[0], self.contents[1], self.contents[2], self.contents[3], self.contents[4], self.contents[5], self.contents[6], self.contents[7], self.contents[8]);
         write!(f, "{}", str)
@@ -39,8 +37,7 @@ impl Board {
     }
 
     pub fn location_is_available(&self, location: u8) -> bool {
-        let sym = self.contents[location as usize];
-        !(sym == 'X' || sym == 'O')
+        self.contents[location as usize] == ' '
     }
     
     pub fn is_in_win_state(&self) -> bool {

@@ -4,14 +4,14 @@ mod board;
 
 fn get_valid_input(board: &board::Board) -> u8 {
     let mut buf = String::new();
-    print!("{}:", board.player);
+    print!("{}: ", board.player);
     std::io::stdout().flush().unwrap();
     loop {
         std::io::stdin().read_line(&mut buf).unwrap();
         let input = buf.as_bytes()[0].wrapping_sub('0' as u8 + 1);
         if buf.len() == 2 && input <= 8 && board.location_is_available(input) { return input }
         buf.clear();
-        print!("That does not correspond to an available square. Please try again.\n{}:", board.player);
+        print!("That does not correspond to an available square. Please try again.\n{}: ", board.player);
         std::io::stdout().flush().unwrap();
     }
 }
