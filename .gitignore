@@ -3,7 +3,7 @@
 # implementation here.
 
 # JetBrains project files
-/.idea/
+**/.idea/
 # CMake build files
 /*/*-build-*/
 # Python virtual environment
