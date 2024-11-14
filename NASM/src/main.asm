@@ -92,7 +92,12 @@ section .text
             movzx rax, byte [currentPlayer]                 ; rax[al] = (uint8_t)currentPlayer;                          Get the currentPlayer(al)
             xor al, 0x01                                    ; al ^= 1;                                                   This player's turn was consumed, so switch to the other player
             mov [currentPlayer], al                         ; currentPlayer = al;                                        Set the currentPlayer
+%ifdef MACOS
+            lea rbx, [playerSymbols]                        ; rbx = (char*)playerSymbols;                                Get a pointer to the playerSymbols(rbx)
+            mov al, [rax + rbx]                             ; al = (char)((char*)playerSymbols[(uint8_t)currentPlayer])  Get the playerSymbols(rbx) for the currentPlayer(al)
+%else
             mov al, [rax + playerSymbols]                   ; al = (char)((char*)playerSymbols[(uint8_t)currentPlayer])  Get the symbol for the currentPlayer(al)
+%endif
             mov [currentPlayerSymbol], al                   ; currentPlayerSymbol = al;                                  Set the currentPlayerSymbol(al)
             jmp _startLoop1                                 ; continue @Play;                                            The game has not yet finished, so continue playing
         _startLoop1END:
@@ -117,8 +122,17 @@ section .text
     ;
     ; Takes the index of a location on the board [0, 8] and returns the current state of the board at that location ['X', 'O', ' '].
     getBoardLocationState:
-        movzx rax, byte [rax + boardIndices]  ; rax[al] = index;         Get the board string index of the given board location
-        movzx rax, byte [rax + board]         ; rax[al] = board[index];  Get the board string value at that index
+%ifdef MACOS
+        push rbx
+        lea rbx, [boardIndices]               ; rbx = (uint8_t*)boardIndices;  Load a pointer to the board indices
+        movzx rax, byte [rax + rbx]           ; rax[al] = index;               Get the board string index of the given board location
+        lea rbx, [board]                      ; rbx = (char*)board;            Load a pointer to the board
+        movzx rax, byte [rax + rbx]           ; rax[al] = board[index];        Get the board string value at that index
+        pop rbx
+%else
+        movzx rax, byte [rax + boardIndices]  ; rax[al] = index;               Get the board string index of the given board location
+        movzx rax, byte [rax + board]         ; rax[al] = board[index];        Get the board string value at that index
+%endif
         ret
 
     ; Takes    : al = (uint8_t)boardLocationIndex, ah = (char)state
@@ -128,9 +142,18 @@ section .text
     ; Takes the index of a location on the board [0, 8] and returns the current state of the board at that location ['X', 'O', ' '].
     setBoardLocationState:
         push rbx  ; bl is (uint8_t)boardLocationIndex
-        movzx rbx, al                 ; rbx(bl) = al;  Move the location(al) for later use
-        mov bl, [rbx + boardIndices]  ; bl = index;    Get the index(bl) corresponding to location(rbx)
-        mov [rbx + board], ah         ; *index = ah;   Set the board's value at that index to the provided state(ah)
+        movzx rbx, al                 ; rbx[bl] = al;                  Move the location(al) for later use
+%ifdef MACOS
+        push rcx
+        lea rcx, [boardIndices]       ; rcx = (uint8_t*)boardIndices;  Load a pointer to the boardIndices
+        mov bl, [rbx + rcx]           ; bl = index;                    Get the index(bl) corresponding to location(rbx)
+        lea rcx, [board]              ; rcx = (char*)board;            Load a pointer to the board
+        mov [rbx + rcx], ah           ; *index = ah;                   Set the board's value at that index to the provided state(ah)
+        pop rcx
+%else
+        mov bl, [rbx + boardIndices]  ; bl = index;                    Get the index(bl) corresponding to location(rbx)
+        mov [rbx + board], ah         ; *index = ah;                   Set the board's value at that index to the provided state(ah)
+%endif
         pop rbx
         ret
 
@@ -140,33 +163,48 @@ section .text
     ; @todo This function could maybe(?) benefit from SIMD - A fun exercise and learning opportunity
     ; Returns true if the currentPlayer's pieces form a pattern that wins the game
     detectWinState:
-        push rbx  ; bl is (char)currentPlayerSymbol, bh is (char)thisBoardState
-        push rcx
-        push rdx
-        mov bl, [currentPlayerSymbol]  ; al = (char)currentPlayerSymbol;
-        xor rcx, rcx                   ; rcx = 0;                                                                                   rcx is used to iterate over winStates
+%ifdef MACOS
+        push rbx  ; rbx is used as a scratch register, bl is (char)currentPlayerSymbol, bh is (char)thisBoardState
+%else
+        push bl  ; bl is (char)currentPlayerSymbol, bh is (char)thisBoardState
+%endif
+        push rcx  ; rcx is used to iterate over winStates
+        push rdx  ; rdx is used as a scratch register
+        xor rcx, rcx                   ; rcx = 0;                                                                                    Start with the first winState
         _detectWinState_foreach_winState_winStates:  ; @WinStates for rcx in 0..winStatesLen:
-            xor rax, rax                             ; rax = 0;                                                                     al is used to iterate over each winState and is used as the return value
+            xor rax, rax                             ; rax = 0;                                                                      al is used to iterate over each winState and is used as the return value
             _detectWinState_foreach_boardIndex_winState:  ; @WinState for rax in 0..3:
                     ; boardIndex(rdx) = winStateIndex(al) + currentWinState(rcx) * winStateLen(actually 4 instead of 3) + winStates
-                movzx rdx, byte [rax + rcx * winStateLenPadded + winStates]  ; rdx = (uint8_t)boardIndex;                           Get the boardIndex stored in winStates[rcx][rax]
-                mov bh, byte [rdx + board]                                   ; bh = (char)stateAtIndex;                             Get the stateAtIndex of the boardIndex(rdx)
-                cmp bl, bh                                                   ;                                                      Compare stateAtIndex(bh) with currentPlayerSymbol(bl)
-                jne _detectWinState_foreach_boardIndex_winState_END          ; if bh != bl: break @WinState; else:                  If the current player does not control this square then he or she cannot win with this winState
-                inc al                                                       ; ++al;                                                Look at the next index in this winState
-                cmp al, winStateLenRelevant                                  ;                                                      Compare winStateIndex(al) with 3
-                jl _detectWinState_foreach_boardIndex_winState               ; if al < 3: continue @WinState; else:                 If not all 3 indices in this winState have been checked then continue checking them
-                mov al, 0x01                                                 ; al = true;                                           The currentPlayer has won, so set the return value to true
+%ifdef MACOS
+                lea rdx, [winStates]                                         ; rdx = (uint8_t*)winStates;                            Load a pointer to the winStates
+                add rdx, rax                                                 ; rdx += rax                                            Offset the pointer(rdx) by thisWinState(rax)
+                movzx rdx, byte [rcx * winStateLenPadded + rdx]              ; rdx = (uint8_t)boardIndex;                            Get the boardIndex stored in winStates[rcx][rax]
+                lea rbx, [board]                                             ; rbx = (char*)board                                    Load a pointer to the board
+                movzx rbx, byte [rdx + rbx]                                  ; rbx[bl] = ((char)(char*)board[(uint8_t)boardIndex]);  Get the stateAtIndex of the boardIndex(rdx)
+%else
+                movzx rdx, byte [rax + rcx * winStateLenPadded + winStates]  ; rdx = (uint8_t)boardIndex;                            Get the boardIndex stored in winStates[rcx][rax]
+                mov bl, [rdx + board]                                        ; bl = (char)stateAtIndex;                              Get the stateAtIndex of the boardIndex(rdx)
+%endif
+                cmp bl, [currentPlayerSymbol]                                ;                                                       Compare stateAtIndex(bl) with currentPlayerSymbol
+                jne _detectWinState_foreach_boardIndex_winState_END          ; if bh != bl: break @WinState; else:                   If the current player does not control this square then he or she cannot win with this winState
+                inc al                                                       ; ++al;                                                 Look at the next index in this winState
+                cmp al, winStateLenRelevant                                  ;                                                       Compare winStateIndex(al) with 3
+                jl _detectWinState_foreach_boardIndex_winState               ; if al < 3: continue @WinState; else:                  If not all 3 indices in this winState have been checked then continue checking them
+                mov al, 0x01                                                 ; al = true;                                            The currentPlayer has won, so set the return value to true
                 jmp _detectWinState_foreach_winState_winStates_END           ; break @WinStates;
             _detectWinState_foreach_boardIndex_winState_END:
-            inc rcx                                        ; ++rcx;                                                                 Look at the next winState
-            cmp rcx, winStatesLen / winStateLenPadded      ;                                                                        Compare currentWinState(rcx) to winStatesLen / winStateLenPadded
-            jl _detectWinState_foreach_winState_winStates  ; if rcx < winStatesLen / winStateLenPadded: continue @WinStates; else:  If not all winStates have been checked then continue checking them
-            xor al, al                                     ; al = false;                                                            The currentPlayer has not won, so set the return value to false
+            inc rcx                                        ; ++rcx;                                                                  Look at the next winState
+            cmp rcx, winStatesLen / winStateLenPadded      ;                                                                         Compare currentWinState(rcx) to winStatesLen / winStateLenPadded
+            jl _detectWinState_foreach_winState_winStates  ; if rcx < winStatesLen / winStateLenPadded: continue @WinStates; else:   If not all winStates have been checked then continue checking them
+            xor al, al                                     ; al = false;                                                             The currentPlayer has not won, so set the return value to false
         _detectWinState_foreach_winState_winStates_END:
         pop rdx
         pop rcx
+%ifdef MACOS
         pop rbx
+%else
+        pop bl
+%endif
         ret
 
     ; Takes    :
@@ -196,12 +234,22 @@ section .text
     collectInputByte:
         push rbx  ; rbx is (uint64_t)userInputLen
         push cx   ; cl is (bool)bufferOverrun, ch is unused
-        mov rbx, userInputLen  ; rbx = (uint64_t)userInputLen;                                                 Used by all following SystemRead calls
-        xor cl, cl             ; cl = false;                                                                   Buffer has not been overrun
+%ifndef MACOS
+        mov rbx, userInputLen   ; rbx = (uint64_t)userInputLen;                                                Load in the length of the buffer
+%endif
+        xor cl, cl              ; cl = false;                                                                  Buffer has not been overrun
         _collectInputByte_while_lastReadByteNot0x0A:            ; @Read while lastReadByte != 0x0A:
-            lea rax, [userInput]                                ; rax = (char*)userInput;                      Used by the following SystemRead calls
+            lea rax, [userInput]                                ; rax = (char*)userInput;                      Get a pointer to the buffer to read into
+%ifdef MACOS
+            mov rbx, userInputLen                               ; rbx = (uint64_t)userInputLen;                Load in the length of the buffer
+%endif
             call SystemRead                                     ; rax = read(rax, rbx);                        bytesRead(rax) is set after attempting to read bufferBytes(rbx) bytes into buffer(rax)
+%ifdef MACOS
+            lea rbx, [userInput]                                ; rbx = (char*)userInput                       Get a pointer to the buffer
+            cmp byte [rax + rbx - 1], 0x0A                      ;                                              Compare the last byte that was read into the buffer with the newline character
+%else
             cmp byte [rax + userInput - 1], 0x0A                ;                                              Compare the last byte that was read into the buffer with the newline character
+%endif
             je _collectInputByte_while_lastReadByteNot0x0A_END  ; if lastReadByte == '\n': break @Read; else:  If the last read byte is a newline character then the entire input has been buffered, so exit the loop
             mov cl, 0x01                                        ; cl = true;                                   The buffer has been overrun, so set bufferOverrun(cl) to true
             jmp _collectInputByte_while_lastReadByteNot0x0A     ; continue @Read;                              Read in the next bit of the buffer

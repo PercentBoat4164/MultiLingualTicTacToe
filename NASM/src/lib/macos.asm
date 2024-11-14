@@ -25,13 +25,13 @@
         ret
 
     SystemRead:  ; rax = (char*)buffer; rbx = (const uint64_t)characterCount; rcx = (const uint64_t)fileDescriptor
-        push rax
-        pop rax
+        push rcx
         lea rsi, [rax]  ; read into buffer
         mov rax, SYSTEM_CALL_READ  ; read syscall
         mov rdx, rbx  ; read rbx bytes
         xor rdi, rdi  ; read from stdin
         syscall
+        pop rcx
         ret
 
     SystemExit:  ; rax = (uint8_t)exitCode;
