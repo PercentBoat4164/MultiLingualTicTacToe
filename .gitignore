@@ -3,10 +3,10 @@
 # implementation here.
 
 # JetBrains project files
-**/.idea/
+/**/.idea/
 # CMake build files
-/*/*-build-*/
+/**/*-build-*/
 # Python virtual environment
-/*/venv/
+/**/venv/
 # Cargo build files
-/*/target
+/**/target
