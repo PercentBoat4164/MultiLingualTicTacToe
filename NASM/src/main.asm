@@ -209,7 +209,7 @@ section .text
 
     ; Takes    :
     ; Clobbers :
-    ; Returns  : al = (bool)currentPlayerWon
+    ; Returns  :
     ; @todo This function could maybe(?) benefit from SIMD - A fun exercise and learning opportunity
     ; Sets all values in the board
     clearBoard:
@@ -226,7 +226,7 @@ section .text
 
     ; Takes    : rax = (char*)buffer, (uint64_t)rbx = bufferLength
     ; Clobbers :
-    ; Returns  : al = (bool)currentPlayerWon
+    ; Returns  : al = (bool)byteIsValid
     ;
     ; Collects bytes from input in groups of userInputLen. Stops when the last byte is a new line character. Verifies
     ;  input is correctly sized, within the required numeric range, and available on the board. Returns true if all of
