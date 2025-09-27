@@ -3,7 +3,7 @@ bits 64
 global SYSTEM_GLOBAL_ENTRY
 
 section .data
-   ; Used to store the current drawn board
+    ; Used to store the current drawn board
     board: db 0x0A, "Tic-Tac-Toe", 0x0A, " 1 │ 2 │ 3 ", 0x0A, "───┼───┼───", 0x0A, " 4 │ 5 │ 6 ", 0x0A, "───┼───┼───", 0x0A, " 7 │ 8 │ 9 ", 0x0A, 0x0A
     boardLen equ $ - board
 
@@ -41,6 +41,9 @@ section .data
     winStateLenPadded equ 0x04
     turnsRemaining: db 0x09
 
+    ; Used for dynamic dispatching
+    detectWinState: dd qword 0
+
 section .bss
     ; Used for collecting input
     userInput: resb 0x2
@@ -53,6 +56,7 @@ section .text
     ;
     ; The entry point; the meat of the program.
     SYSTEM_GLOBAL_ENTRY:
+        call setupDispatches
         lea rax, [startingText]   ; rax = (char*)startingText;                                                           Get a pointer to the startingText
         mov rbx, startingTextLen  ; rbx = (uint64_t)startingTextLen;                                                     Load in the length of the startingText
         call SystemPrint          ; Print(startingText);                                                                 Print startingText(rax)
@@ -81,7 +85,7 @@ section .text
             lea rax, [board]                                ; rax = (char*)board;                                        Get a pointer to the board
             mov rbx, boardLen                               ; rbx = (uint64_t)boardLen;                                  Load in the length of the board
             call SystemPrint                                ; Print(board);                                              Print board(rax)
-            call detectWinState                             ; al = currentPlayerWon();                                   Check if the board isInWinState(al)
+            call [detectWinState]                           ; al = currentPlayerWon();                                   Check if the board isInWinState(al)
             test al, al                                     ;                                                            Test if the board isInWinState(al)
             jg _startLoop1END                               ; if al: break @Play; else:                                  If so, end the game
             mov al, [turnsRemaining]                        ; al = (uint8_t)turnsRemaining;                              If not, get the number of remainingTurns(al)
@@ -116,6 +120,25 @@ section .text
         xor rax, rax      ; rax = 0;                                                                                     Set exit code zero
         call SystemExit   ; exit(0);                                                                                     Exit the program signaling success
 
+    setupDispatches:
+        push rax
+        push rdx
+        ; Get MMX support in edx
+        mov eax, 1
+        cpuid
+        and edx, 1 << 23
+        jnz _dispatch_MMX
+            mov rax, detectWinState_implementation
+            mov [detectWinState], rax
+            jmp _setupDispatches
+        _dispatch_MMX:
+            mov rax, detectWinState_implementation_MMX
+            mov [detectWinState], rax
+        _setupDispatches:
+        pop rdx
+        pop rax
+        ret
+
     ; Takes    : al = (uint8_t)boardLocationIndex
     ; Clobbers : rax
     ; Returns  : al = (char)state
@@ -139,7 +162,7 @@ section .text
     ; Clobbers :
     ; Returns  :
     ;
-    ; Takes the index of a location on the board [0, 8] and returns the current state of the board at that location ['X', 'O', ' '].
+    ; Takes the index of a location on the board [0, 8] and sets the current state of the board at that location to the contents of ah.
     setBoardLocationState:
         push rbx  ; bl is (uint8_t)boardLocationIndex
         movzx rbx, al                 ; rbx[bl] = al;                  Move the location(al) for later use
@@ -160,9 +183,8 @@ section .text
     ; Takes    :
     ; Clobbers : rax
     ; Returns  : al = (bool)currentPlayerWon
-    ; @todo This function could maybe(?) benefit from SIMD - A fun exercise and learning opportunity
     ; Returns true if the currentPlayer's pieces form a pattern that wins the game
-    detectWinState:
+    detectWinState_implementation:
 %ifdef MACOS
         push rbx  ; rbx is used as a scratch register, bl is (char)currentPlayerSymbol, bh is (char)thisBoardState
 %else
@@ -180,7 +202,7 @@ section .text
                 add rdx, rax                                                 ; rdx += rax                                            Offset the pointer(rdx) by thisWinState(rax)
                 movzx rdx, byte [rcx * winStateLenPadded + rdx]              ; rdx = (uint8_t)boardIndex;                            Get the boardIndex stored in winStates[rcx][rax]
                 lea rbx, [board]                                             ; rbx = (char*)board                                    Load a pointer to the board
-                movzx rbx, byte [rdx + rbx]                                  ; rbx[bl] = ((char)(char*)board[(uint8_t)boardIndex]);  Get the stateAtIndex of the boardIndex(rdx)
+                movzx rbx, byte [rdx + rbx]                                  ; rbx[bl] = (char)((char*)board[(uint8_t)boardIndex]);  Get the stateAtIndex of the boardIndex(rdx)
 %else
                 movzx rdx, byte [rax + rcx * winStateLenPadded + winStates]  ; rdx = (uint8_t)boardIndex;                            Get the boardIndex stored in winStates[rcx][rax]
                 mov bl, [rdx + board]                                        ; bl = (char)stateAtIndex;                              Get the stateAtIndex of the boardIndex(rdx)
@@ -207,9 +229,59 @@ section .text
 %endif
         ret
 
+    detectWinState_implementation_MMX:
+        push rbx
+        push rcx
+        push rdx
+        push rsi
+        push rdi
+        movzx rax, byte [currentPlayerSymbol]
+        mov ah, al
+        shl eax, 8
+        mov al, ah
+        movd xmm1, eax
+        lea rsi, [winStates]
+        lea rdi, [board]
+        ; Iterate over the win states
+        mov rcx, winStatesLen / winStateLenPadded
+        _detectWinStateMMX_loop:
+            ; Load the next win state into eax
+            xor rdx, rdx
+            mov eax, dword [rcx * winStateLenPadded + rsi]
+            ; Put a win state index into bl, dl, and al
+            movzx rbx, al
+            mov dl, ah
+            shr eax, 16
+            ; Index the board by each of the win states requirements and move the results into eax
+            mov al, byte [rdi + rax]
+            shl eax, 16
+            mov ah, byte [rdi + rdx]
+            mov al, byte [rdi + rbx]
+            ; Do all 3 comparisons in one shot
+            movd xmm0, eax
+            pcmpeqb xmm0, xmm1
+            movd eax, xmm0
+            ; Check if all three elements in the win state are equal to the current player's symbol
+            cmp eax, 0xFFFFFFFF
+            je _detectWinStateMMX_playerWon
+            dec cl
+            jne _detectWinStateMMX_loop
+        xor al, al
+        jmp _detectWinStateMMX
+        _detectWinStateMMX_playerWon:
+        mov al, 0x1
+        _detectWinStateMMX:
+        pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+        pop rbx
+        emms
+        ret
+
     ; Takes    :
     ; Clobbers :
-    ; Returns  :
+    ; Returns  : al = (bool)currentPlayerWon
     ; @todo This function could maybe(?) benefit from SIMD - A fun exercise and learning opportunity
     ; Sets all values in the board
     clearBoard:
@@ -226,7 +298,7 @@ section .text
 
     ; Takes    : rax = (char*)buffer, (uint64_t)rbx = bufferLength
     ; Clobbers :
-    ; Returns  : al = (bool)byteIsValid
+    ; Returns  : al = (bool)currentPlayerWon
     ;
     ; Collects bytes from input in groups of userInputLen. Stops when the last byte is a new line character. Verifies
     ;  input is correctly sized, within the required numeric range, and available on the board. Returns true if all of
