@@ -139,8 +139,10 @@ section .text
         ret
 
     detectWinState_implementation:
-        mov rax, [boardState]
         cmp byte [currentPlayerSymbol], "X"
+        mov rax, [boardState]
+        mov rbx, qword [winStates]
+        mov rdx, qword [winStates + 8]
         jne _detectWinState_implementation_X
             mov cl, 4
             jmp _detectWinState_implementation_postSetup
@@ -148,66 +150,44 @@ section .text
             xor cl, cl
         _detectWinState_implementation_postSetup:
         shr rax, cl
-        mov rdx, 0x0101010101010101
-        and rax, rdx
-        xor ch, ch
-        or ch, al
-        shr rax, 7
-        or ch, al
-        shr rax, 7
-        or ch, al
-        shr rax, 7
-        or ch, al
-        shr eax, 7
-        or ch, al
-        shr eax, 7
-        or ch, al
-        shr ax, 7
-        or ch, al
-        shr ax, 7
-        or ch, al
-        mov al, byte [boardState + 8]
-        shr al, cl
-        and al, 1
-        mov cl, ch
-        mov ch, al
-        mov ax, cx
-        and ax, 0b000000111
-        xor ax, 0b000000111
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b000111000
-        xor ax, 0b000111000
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b111000000
-        xor ax, 0b111000000
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b001001001
-        xor ax, 0b001001001
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b010010010
-        xor ax, 0b010010010
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b100100100
-        xor ax, 0b100100100
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b100010001
-        xor ax, 0b100010001
-        jz _detectWinState_implementation_playerWon
-        mov ax, cx
-        and ax, 0b001010100
-        xor ax, 0b001010100
-        jz _detectWinState_implementation_playerWon
-            xor rax, rax
-            ret
-        _detectWinState_implementation_playerWon:
-            mov rax, 1
-            ret
+        mov r8, 0x0101010101010101
+        and rax, r8  ; The first bit of each byte in RAX is set iff the corresponding boardState is the current player symbol
+        mov r8, (1<<(56-0)) + (1<<(57-8)) + (1<<(58-16)) + (1<<(59-24)) + (1<<(60-32)) + (1<<(61-40)) + (1<<(62-48)) + (1<<(63-56)) + (1<<(64-64))
+        imul rax, r8
+        shr rax, 56
+        mov ah, byte [boardState + 8]
+        shr ah, cl
+        and ah, 1  ; AX is filled with a bitmask matching the winStates layout
+        mov cx, ax
+        shl eax, 16
+        or eax, ecx
+        mov ecx, eax
+        shl rax, 32
+        or rax, rcx
+        mov rcx, rax  ; RAX and RCX are filled with 4 of the bitmasks generated above
+        and rax, rbx
+        and rcx, rdx
+        xor rax, rbx
+        xor rcx, rdx  ; If any word in RAX or RCX is equal to 0, then the player has won
+        mov r8, 0x7FFF7FFF7FFF7FFF
+        mov rbx, rax
+        mov rdx, rcx
+        and rax, r8
+        and rcx, r8
+        add rax, r8
+        add rcx, r8
+        or rax, rbx
+        or rcx, rdx
+        or rax, r8
+        or rcx, r8
+        not rax
+        test rax, rax
+        setnz al
+        not rcx
+        test rcx, rcx
+        setnz cl
+        or al, cl
+        ret
 
     detectWinState_implementation_SSE2:
         cmp byte [currentPlayerSymbol], "X"
