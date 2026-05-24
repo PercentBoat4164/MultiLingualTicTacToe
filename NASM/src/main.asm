@@ -49,6 +49,7 @@ section .rodata
     invalidInputTextConstantLen equ $ - invalidInputTextConstant
     tieGameText: db "Game over. No winner.", 0x0A
     tieGameTextLen equ $ - tieGameText
+    space: db "        "
 
 section .text
     SYSTEM_GLOBAL_ENTRY:
@@ -108,7 +109,12 @@ section .text
         call SystemExit
 
     setupDispatches:
-        mov eax, 0
+        mov eax, 7
+        xor ecx, ecx
+        cpuid
+        test ebx, 1 << 5
+        jnz _setupDispatches_AVX2
+        mov eax, 1
         cpuid
         test ebx, 1 << 26
         jnz _setupDispatches_SSE2
@@ -134,29 +140,21 @@ section .text
     detectWinState_implementation:
         cmp byte [rel currentPlayerSymbol], "X"
         mov rax, [rel boardState]
+        mov r8, 0x0101010101010101
         mov rbx, qword [rel winStates]
         mov rdx, qword [rel winStates + 8]
-        jne _detectWinState_implementation_X
-            mov cl, 4
-            jmp _detectWinState_implementation_postSetup
-        _detectWinState_implementation_X:
-            xor cl, cl
-        _detectWinState_implementation_postSetup:
+        sete cl
+        shl cl, 2  ; cl is 4 if checking for X player win and 0 if checking for O player win
         shr rax, cl
-        mov r8, 0x0101010101010101
         and rax, r8  ; The first bit of each byte in RAX is set iff the corresponding boardState is the current player symbol
         mov r8, (1<<(56-0)) + (1<<(57-8)) + (1<<(58-16)) + (1<<(59-24)) + (1<<(60-32)) + (1<<(61-40)) + (1<<(62-48)) + (1<<(63-56)) + (1<<(64-64))
-        imul rax, r8
+        mul rax, r8
         shr rax, 56
         mov ah, byte [rel boardState + 8]
         shr ah, cl
         and ah, 1  ; AX is filled with a bitmask matching the winStates layout
-        mov cx, ax
-        shl eax, 16
-        or eax, ecx
-        mov ecx, eax
-        shl rax, 32
-        or rax, rcx
+        mov r8, (1<<48) + (1<<32) + (1<<16) + 1
+        mul rax, r8
         mov rcx, rax  ; RAX and RCX are filled with 4 of the bitmasks generated above
         and rax, rbx
         and rcx, rdx
@@ -174,9 +172,9 @@ section .text
         or rax, r8
         or rcx, r8
         not rax
+        not rcx
         test rax, rax
         setnz al
-        not rcx
         test rcx, rcx
         setnz cl
         or al, cl
@@ -214,7 +212,8 @@ section .text
             psllq xmm0, 3
         _detectWinState_implementation_AVX2_postSetup:
         pmovmskb eax, xmm0
-        vpbroadcastw xmm0, ax
+        movd xmm0, eax
+        {vex}vpbroadcastw xmm0, xmm0
         pand xmm0, xmm1
         pcmpeqw xmm0, xmm1
         pmovmskb eax, xmm0
@@ -223,21 +222,20 @@ section .text
         ret
 
     clearBoard_implementation:
-        mov rax, "        "
+        mov rax, qword [rel space]
         mov qword [rel boardState], rax
         mov qword [rel boardState + 8], rax
         ret
 
     clearBoard_implementation_SSE2:
-        mov rax, "        "
+        mov rax, qword [rel space]
         movq xmm0, rax
         movlhps xmm0, xmm0
         movdqa [rel boardState], xmm0
         ret
 
     clearBoard_implementation_AVX2:
-        mov al, " "
-        vpbroadcastb xmm0, al
+        {vex}vpbroadcastb xmm0, [rel space]
         movdqa [rel boardState], xmm0
         ret
 
