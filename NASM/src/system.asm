@@ -26,8 +26,7 @@ SystemRead:  ; rsi = (char*)buffer; rdx = (const uint64_t)characterCount;
     syscall
     ret
 
-SystemExit:  ; rax = (uint8_t)exitCode;
-    mov rdi, rax
+SystemExit:  ; rdi = (uint8_t)exitCode;
     mov rax, SYSTEM_CALL_EXIT
     syscall
     ret
